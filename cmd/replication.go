@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/zrepl/zrepl/jobrun"
 	"github.com/zrepl/zrepl/rpc"
@@ -248,14 +250,16 @@ type PullContext struct {
 
 func doPull(pull PullContext) (err error) {
 
-	remote := pull.Remote
+	//	remote := pull.Remote
 	log := pull.Log
 
+	var remote rpc.ZreplClient
+
 	log.Printf("requesting remote filesystem list")
-	fsr := rpc.FilesystemRequest{}
-	var remoteFilesystems []*zfs.DatasetPath
-	if remoteFilesystems, err = remote.FilesystemRequest(fsr); err != nil {
-		return
+	remoteFilesystems, err := rpcRemoteFilesystems(log)
+	if err != nil {
+		log.Printf("error getting remote filesystem list: %s", err)
+		return err
 	}
 
 	log.Printf("map remote filesystems to local paths and determine order for per-filesystem sync")
@@ -335,10 +339,7 @@ func doPull(pull PullContext) (err error) {
 		}
 
 		log("requesting remote filesystem versions")
-		var theirVersions []zfs.FilesystemVersion
-		theirVersions, err = remote.FilesystemVersionsRequest(rpc.FilesystemVersionsRequest{
-			Filesystem: m.Remote,
-		})
+		theirVersions, err := rpcTheirFilesystemVersions(m.Remote)
 		if err != nil {
 			log("error requesting remote filesystem versions: %s", err)
 			log("stopping replication for all filesystems mapped as children of %s", m.Local.ToString())
@@ -503,4 +504,46 @@ func doPull(pull PullContext) (err error) {
 
 	return
 
+}
+
+func rpcRemoteFilesystems(remote rpc.ZreplClient) (remoteFilesystems []*zfs.DatasetPath, err error) {
+	request := rpc.FilesystemsRequest{}
+	reply, err := remote.Filesystems(context.TODO(), &request)
+	if err != nil {
+		return nil, err
+	}
+	remoteFilesystems = make([]*zfs.DatasetPath, len(reply.Filesystems))
+	for i := range remoteFilesystems {
+		remoteFilesystems[i], err = zfs.NewDatasetPath(reply.Filesystems[i].Path)
+		if err != nil {
+			return nil, errors.Wrap(err, "cannot convert remote filesystem to zfs.DatasetPath")
+		}
+	}
+	return remoteFilesystems, nil
+}
+
+func rpcTheirFilesystemVersions(remote rpc.ZreplClient, remotePath zfs.DatasetPath) (versions []zfs.FilesystemVersion, err error) {
+	request := rpc.FilesystemVersionsRequest{
+		Path: remotePath.ToString(),
+	}
+	reply, err := remote.FilesystemVersions(context.TODO(), &request)
+	if err != nil {
+		return err
+	}
+	versions := make([]zfs.FilesystemVersion, len(reply.Versions))
+	for i := range versions {
+		versions[i], err = rpc.ToZFSFilesystemVersion(reply.Versions[i])
+		if err != nil {
+			return nil, errors.Wrap(err, "cannot convert response to zfs.ZFSFilesystemVersion")
+		}
+	}
+	return versions, nil
+}
+
+func rpcInitialTransferRequest(remote rpc.ZreplClient, filesystem zfs.DatasetPath, version zfs.FilesystemVersion) (io.Reader, err error) {
+	v := rpc.FromZFSFilesystemVersion(version)
+	initial := rpc.TransferRequest_Initial{
+		
+	}
+	// TODO
 }

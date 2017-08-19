@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package rpc;
+
+// The greeting service definition.
+service Zrepl {
+  rpc Helo(HeloRequest) returns (HeloReply);
+  rpc Filesystems(FilesystemsRequest) returns (FilesystemsReply);
+  rpc FilesystemVersions(FilesystemVersionsRequest) returns (FilesystemVersionsReply);
+  rpc Transfer(TransferRequest) returns (TransferReply);
+}
+
+message FilesystemVersion {
+    string type = 1;
+    string name = 2;
+    fixed64 guid = 3;
+    fixed64 create_txg = 4;
+    google.protobuf.Timestamp creation = 5;
+}
+
+
+message Filesystem {
+    string path = 1;
+}
+
+// HELO
+message HeloRequest {
+    int32 protocol_version = 1;
+}
+
+message HeloReply {
+    bool ok = 1;
+}
+
+// FILESYSTEM REQUEST
+message FilesystemsRequest {
+    
+}
+message FilesystemsReply {
+    repeated Filesystem filesystems = 1;
+}
+
+// FILESYSTEM VERSION REQUEST
+message FilesystemVersionsRequest {
+    string path = 1; 
+}
+
+message FilesystemVersionsReply {
+    repeated FilesystemVersion versions = 1; 
+}
+
+// TRANSFER
+message TransferRequest {
+    string filesystem_path = 1;
+    message Increment {
+        FilesystemVersion from = 1;
+        FilesystemVersion to = 2;
+    }
+    message Initial {
+        FilesystemVersion version = 1;
+    }
+    message Resume {
+        string receive_resume_token = 1;
+    }
+    oneof Transfer {
+        Increment increment = 2;
+        Resume resume = 3;
+        Initial initial = 4;
+    }
+}
+
+message TransferReply {
+    message Header {
+        bool ok = 1;
+    }
+    message Chunk {
+        bytes data = 1;
+    }
+    Header header = 1;
+    Chunk chunk = 2;
+}
+
