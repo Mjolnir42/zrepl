@@ -27,9 +27,10 @@ type endpointDescr struct {
 func typeIsIOReader(t reflect.Type) bool {
 	return t == reflect.TypeOf((*io.Reader)(nil)).Elem()
 }
-func typeIsIOWriter(t reflect.Type) bool {
-	return t == reflect.TypeOf((*io.Writer)(nil)).Elem()
+func typeIsIOReaderPtr(t reflect.Type) bool {
+	return t == reflect.TypeOf((*io.Reader)(nil))
 }
+
 func makeEndpointDescr(handler interface{}) (descr endpointDescr, err error) {
 
 	ht := reflect.TypeOf(handler)
@@ -43,12 +44,12 @@ func makeEndpointDescr(handler interface{}) (descr endpointDescr, err error) {
 		err = errors.Errorf("handler must have exactly two input parameters and one output parameter")
 		return
 	}
-	if ht.In(0).Kind() == reflect.Ptr || typeIsIOReader(ht.In(0)) {
-		err = errors.Errorf("input parameter must be a pointer or an io.Reader")
+	if !(ht.In(0).Kind() == reflect.Ptr || typeIsIOReader(ht.In(0))) {
+		err = errors.Errorf("input parameter must be a pointer or an io.Reader, is of kind %s, type %s", ht.In(0).Kind(), ht.In(0))
 		return
 	}
-	if ht.In(1).Kind() == reflect.Ptr || typeIsIOWriter(ht.In(1)) {
-		err = errors.Errorf("second input parameter (the non-error output parameter) must be a pointer or an io.Writer")
+	if !(ht.In(1).Kind() == reflect.Ptr) {
+		err = errors.Errorf("second input parameter (the non-error output parameter) must be a pointer or an *io.Reader")
 		return
 	}
 	errInterfaceType := reflect.TypeOf((*error)(nil)).Elem()
@@ -67,7 +68,7 @@ func makeEndpointDescr(handler interface{}) (descr endpointDescr, err error) {
 		descr.inType.proto = DataTypeMarshaledJSON
 	}
 
-	if typeIsIOWriter(ht.In(1)) {
+	if typeIsIOReaderPtr(ht.In(1)) {
 		descr.outType.proto = DataTypeOctets
 	} else {
 		descr.outType.proto = DataTypeMarshaledJSON
@@ -79,8 +80,7 @@ func makeEndpointDescr(handler interface{}) (descr endpointDescr, err error) {
 type MarshaledJSONEndpoint func(bodyJSON interface{})
 
 func NewServer(rwc io.ReadWriteCloser) *Server {
-	fl := &FrameLayer{rwc}
-	ml := &MessageLayer{fl}
+	ml := &MessageLayer{rwc}
 	return &Server{
 		ml, make(map[string]endpointDescr),
 	}
@@ -134,7 +134,7 @@ func (s *Server) ServeConn() (err error) {
 	switch ep.inType.proto {
 	case DataTypeMarshaledJSON:
 		// Unmarshal input
-		inval := reflect.New(ep.inType.local.Elem())
+		inval = reflect.New(ep.inType.local.Elem())
 		invalIface := inval.Interface()
 		err = json.NewDecoder(dr).Decode(invalIface)
 		if err != nil {
@@ -152,33 +152,26 @@ func (s *Server) ServeConn() (err error) {
 		panic("not implemented")
 	}
 
-	// Determine outval
-	var outval reflect.Value
-	switch ep.outType.proto {
-	case DataTypeMarshaledJSON:
-		outval = reflect.New(ep.outType.local) // double pointer
-	case DataTypeOctets:
-		// Send octets header now
-		// get a data frames writer
-		// Then set ouval to that writer
-		panic("not impemented")
-	default:
-		panic("not implemented")
-	}
+	outval := reflect.New(ep.outType.local.Elem()) // outval is a double pointer
+
+	log.Printf("before handler, inval=%v outval=%v", inval, outval)
 
 	// Call the handler
 	errs := ep.handler.Call([]reflect.Value{inval, outval})
+
 	if !errs[0].IsNil() {
 		// send error header now and exit
 		panic("not implemented")
 		return ml.HangUp()
 	}
 
-	if ep.outType.proto == DataTypeMarshaledJSON {
+	switch ep.outType.proto {
+
+	case DataTypeMarshaledJSON:
 
 		var dataBuf bytes.Buffer
 		// Marshal output
-		err = json.NewEncoder(&dataBuf).Encode(outval)
+		err = json.NewEncoder(&dataBuf).Encode(outval.Interface())
 		if err != nil {
 			r := NewErrorHeader(StatusServerError, "cannot marshal response: %s", err)
 			err = ml.WriteHeader(r)
@@ -197,12 +190,26 @@ func (s *Server) ServeConn() (err error) {
 			return errors.WithStack(err)
 		}
 
-		dw := ml.WriteData()
-		_, err := io.Copy(dw, &dataBuf)
+		err = ml.WriteData(&dataBuf)
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		dw.Close()
+
+	case DataTypeOctets:
+
+		h := Header{
+			DataType: DataTypeOctets,
+		}
+		err = ml.WriteHeader(&h)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		reader := outval.Interface().(*io.Reader) // we checked that when adding the endpoint
+		err = ml.WriteData(*reader)
+		if err != nil {
+			// TODO send trailer? how should client know?
+			return errors.WithStack(err)
+		}
 
 	}
 
