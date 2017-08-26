@@ -11,6 +11,7 @@ import (
 
 type Server struct {
 	ml        *MessageLayer
+	logger    Logger
 	endpoints map[string]endpointDescr
 }
 
@@ -80,10 +81,15 @@ func makeEndpointDescr(handler interface{}) (descr endpointDescr, err error) {
 type MarshaledJSONEndpoint func(bodyJSON interface{})
 
 func NewServer(rwc io.ReadWriteCloser) *Server {
-	ml := &MessageLayer{rwc}
+	ml := NewMessageLayer(rwc)
 	return &Server{
-		ml, make(map[string]endpointDescr),
+		ml, noLogger{}, make(map[string]endpointDescr),
 	}
+}
+
+func (s *Server) SetLogger(logger Logger) {
+	s.logger = logger
+	s.ml.logger = logger
 }
 
 func (s *Server) RegisterEndpoint(name string, handler interface{}) (err error) {
@@ -154,7 +160,7 @@ func (s *Server) ServeConn() (err error) {
 
 	outval := reflect.New(ep.outType.local.Elem()) // outval is a double pointer
 
-	log.Printf("before handler, inval=%v outval=%v", inval, outval)
+	s.logger.Printf("before handler, inval=%v outval=%v", inval, outval)
 
 	// Call the handler
 	errs := ep.handler.Call([]reflect.Value{inval, outval})

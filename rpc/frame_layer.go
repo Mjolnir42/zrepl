@@ -10,13 +10,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// debug log
-var log devNullLog
-
-type devNullLog struct{}
-
-func (l devNullLog) Printf(format string, args ...interface{}) {}
-
 type Frame struct {
 	Type          FrameType
 	NoMoreFrames  bool
@@ -89,6 +82,7 @@ func (r *frameBridgingReader) Read(b []byte) (n int, err error) {
 	if r.bytesLeftToLimit == 0 {
 		return 0, io.EOF
 	}
+	log := r.l.logger
 	if r.f.PayloadLength == 0 {
 
 		if r.f.NoMoreFrames {
@@ -193,11 +187,12 @@ func (w *frameBridgingWriter) Close() (err error) {
 }
 
 type MessageLayer struct {
-	rwc io.ReadWriteCloser
+	rwc    io.ReadWriteCloser
+	logger Logger
 }
 
 func NewMessageLayer(rwc io.ReadWriteCloser) *MessageLayer {
-	return &MessageLayer{rwc}
+	return &MessageLayer{rwc, noLogger{}}
 }
 
 func (l *MessageLayer) HangUp() (err error) {

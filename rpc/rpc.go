@@ -35,10 +35,6 @@ type RPCHandler interface {
 	HandlePullMeRequest(r PullMeRequest, clientIdentity string, client RPCRequester) (err error)
 }
 
-type Logger interface {
-	Printf(format string, args ...interface{})
-}
-
 const ByteStreamRPCProtocolVersion = 1
 
 type ByteStream interface {
