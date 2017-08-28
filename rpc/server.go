@@ -25,13 +25,6 @@ type endpointDescr struct {
 	handler reflect.Value
 }
 
-func typeIsIOReader(t reflect.Type) bool {
-	return t == reflect.TypeOf((*io.Reader)(nil)).Elem()
-}
-func typeIsIOReaderPtr(t reflect.Type) bool {
-	return t == reflect.TypeOf((*io.Reader)(nil))
-}
-
 func makeEndpointDescr(handler interface{}) (descr endpointDescr, err error) {
 
 	ht := reflect.TypeOf(handler)
@@ -101,36 +94,97 @@ func (s *Server) RegisterEndpoint(name string, handler interface{}) (err error) 
 	return
 }
 
-func (s *Server) ServeConn() (err error) {
+func checkResponseHeader(h *Header) (err error) {
+	var statusNotSet Status
+	if h.Error == statusNotSet {
+		return errors.Errorf("status has zero-value")
+	}
+	return nil
+}
+
+func (s *Server) writeResponse(h *Header) (err error) {
+	// TODO validate
+	return s.ml.WriteHeader(h)
+}
+
+func (s *Server) recvRequest() (h *Header, err error) {
+	h, err = s.ml.ReadHeader()
+	if err != nil {
+		s.logger.Printf("error reading header: %s", err)
+		return nil, err
+	}
+
+	s.logger.Printf("validating request")
+	err = nil // TODO validate
+	if err == nil {
+		return h, nil
+	}
+	s.logger.Printf("request validation error: %s", err)
+
+	r := NewErrorHeader(StatusRequestError, "%s", err)
+	return nil, s.writeResponse(r)
+}
+
+var doneServeNext error = errors.New("this should not cause a HangUp() in the server")
+
+var ProtocolError error = errors.New("protocol error, server should hang up")
+
+// Serve the connection until failure or the client hangs up
+func (s *Server) Serve() (err error) {
+	for {
+
+		err = s.ServeRequest()
+
+		if err == nil {
+			continue
+		}
+
+		if err == doneServeNext {
+			s.logger.Printf("subroutine returned pseudo-error indicating early-exit")
+			continue
+		}
+
+		s.logger.Printf("hanging up after ServeRequest returned error: %s", err)
+		s.ml.HangUp()
+		return err
+	}
+}
+
+// Serve a single request
+// * wait for request to come in
+// * call handler
+// * reply
+//
+// The connection is left open, the next bytes on the conn should be
+// the next request header.
+//
+// Returns an err != nil if the error is bad enough to hang up on the client.
+// Examples: 		protocol version mismatches, protocol errors in general, ...
+// Non-Examples:	a handler error
+func (s *Server) ServeRequest() (err error) {
 
 	ml := s.ml
-	h, err := ml.ReadHeader()
+
+	s.logger.Printf("reading header")
+	h, err := s.recvRequest()
+	if err != nil {
+		return err
+	}
 
 	ep, ok := s.endpoints[h.Endpoint]
 	if !ok {
 		r := NewErrorHeader(StatusRequestError, "unregistered endpoint %s", h.Endpoint)
-		err = ml.WriteHeader(r)
-		if err != nil {
-			return errors.WithStack(err)
-		}
-		return ml.HangUp()
+		return s.writeResponse(r)
 	}
 
 	if ep.inType.proto != h.DataType {
 		r := NewErrorHeader(StatusRequestError, "wrong DataType for endpoint %s (has %s, you provided %s)", h.Endpoint, ep.inType.proto, h.DataType)
-		err = ml.WriteHeader(r)
-		if err != nil {
-			return errors.WithStack(err)
-		}
-		return ml.HangUp()
+		return s.writeResponse(r)
 	}
+
 	if ep.outType.proto != h.Accept {
 		r := NewErrorHeader(StatusRequestError, "wrong Accept for endpoint %s (has %s, you provided %s)", h.Endpoint, ep.outType.proto, h.Accept)
-		err = ml.WriteHeader(r)
-		if err != nil {
-			return errors.WithStack(err)
-		}
-		return ml.HangUp()
+		return s.writeResponse(r)
 	}
 
 	dr := ml.ReadData()
@@ -144,12 +198,8 @@ func (s *Server) ServeConn() (err error) {
 		invalIface := inval.Interface()
 		err = json.NewDecoder(dr).Decode(invalIface)
 		if err != nil {
-			r := NewErrorHeader(StatusRequestError, "cannot decode marshaled JSON: %s")
-			err = ml.WriteHeader(r)
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			return ml.HangUp()
+			r := NewErrorHeader(StatusRequestError, "cannot decode marshaled JSON: %s", err)
+			return s.writeResponse(r)
 		}
 	case DataTypeOctets:
 		// Take data as is
@@ -166,9 +216,10 @@ func (s *Server) ServeConn() (err error) {
 	errs := ep.handler.Call([]reflect.Value{inval, outval})
 
 	if !errs[0].IsNil() {
-		// send error header now and exit
-		panic("not implemented")
-		return ml.HangUp()
+		he := errs[0].Interface().(error) // we checked that before...
+		s.logger.Printf("handler returned error: %s", err)
+		r := NewErrorHeader(StatusError, "%s", he.Error())
+		return s.writeResponse(r)
 	}
 
 	switch ep.outType.proto {
@@ -180,47 +231,38 @@ func (s *Server) ServeConn() (err error) {
 		err = json.NewEncoder(&dataBuf).Encode(outval.Interface())
 		if err != nil {
 			r := NewErrorHeader(StatusServerError, "cannot marshal response: %s", err)
-			err = ml.WriteHeader(r)
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			return ml.HangUp()
+			return s.writeResponse(r)
 		}
 
 		replyHeader := Header{
 			Error:    StatusOK,
 			DataType: ep.outType.proto,
 		}
-		err = ml.WriteHeader(&replyHeader)
-		if err != nil {
-			return errors.WithStack(err)
+		if err = s.writeResponse(&replyHeader); err != nil {
+			return err
 		}
 
-		err = ml.WriteData(&dataBuf)
-		if err != nil {
-			return errors.WithStack(err)
+		if err = ml.WriteData(&dataBuf); err != nil {
+			return
 		}
 
 	case DataTypeOctets:
 
 		h := Header{
+			Error:    StatusOK,
 			DataType: DataTypeOctets,
 		}
-		err = ml.WriteHeader(&h)
-		if err != nil {
-			return errors.WithStack(err)
+		if err = s.writeResponse(&h); err != nil {
+			return
 		}
+
 		reader := outval.Interface().(*io.Reader) // we checked that when adding the endpoint
 		err = ml.WriteData(*reader)
 		if err != nil {
-			// TODO send trailer? how should client know?
-			return errors.WithStack(err)
+			return err
 		}
 
 	}
 
-	// Octets would have already been sent
-
 	return nil
-
 }

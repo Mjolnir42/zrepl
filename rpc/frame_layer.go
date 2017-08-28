@@ -32,6 +32,8 @@ const (
 	StatusOK Status = 1 + iota
 	StatusRequestError
 	StatusServerError
+	// Returned when an error occurred but the side at fault cannot be determined
+	StatusError
 )
 
 type Header struct {
@@ -57,7 +59,8 @@ func NewErrorHeader(status Status, format string, args ...interface{}) (h *Heade
 type DataType uint8
 
 const (
-	DataTypeMarshaledJSON DataType = 1 + iota
+	DataTypeNone DataType = 1 + iota
+	DataTypeMarshaledJSON
 	DataTypeOctets
 )
 
