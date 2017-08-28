@@ -93,7 +93,6 @@ func (r *frameBridgingReader) Read(b []byte) (n int, err error) {
 		log.Printf("reading frame")
 		r.f, err = r.l.readFrame()
 		if err != nil {
-			err = errors.Wrap(err, "error reading frame")
 			return 0, err
 		}
 		log.Printf("read frame: %#v", r.f)
@@ -195,16 +194,25 @@ func NewMessageLayer(rwc io.ReadWriteCloser) *MessageLayer {
 	return &MessageLayer{rwc, noLogger{}}
 }
 
+// Always returns an error, RST error if no error occurred while sending RST frame
 func (l *MessageLayer) HangUp() (err error) {
-	f := Frame{Type: FrameTypeRST}
+	l.logger.Printf("hanging up")
+	f := Frame{
+		Type:         FrameTypeRST,
+		NoMoreFrames: true,
+	}
 	rstFrameError := l.writeFrame(f)
 	closeErr := l.rwc.Close()
 	if rstFrameError != nil {
-		return rstFrameError
+		return errors.WithStack(rstFrameError)
+	} else if closeErr != nil {
+		return errors.WithStack(closeErr)
 	} else {
-		return closeErr
+		return RST
 	}
 }
+
+var RST error = fmt.Errorf("reset frame observed on connection")
 
 func (l *MessageLayer) readFrame() (f Frame, err error) {
 	err = binary.Read(l.rwc, binary.LittleEndian, &f.Type)
@@ -220,6 +228,10 @@ func (l *MessageLayer) readFrame() (f Frame, err error) {
 	err = binary.Read(l.rwc, binary.LittleEndian, &f.PayloadLength)
 	if err != nil {
 		err = errors.WithStack(err)
+		return
+	}
+	if f.Type == FrameTypeRST {
+		err = RST
 		return
 	}
 	if f.PayloadLength > MAX_PAYLOAD_LENGTH {
@@ -250,10 +262,14 @@ func (l *MessageLayer) writeFrame(f Frame) (err error) {
 }
 
 func (l *MessageLayer) ReadHeader() (h *Header, err error) {
+
 	r := NewFrameBridgingReader(l, FrameTypeHeader, MAX_HEADER_LENGTH)
 	h = &Header{}
-	err = json.NewDecoder(r).Decode(&h)
-	return h, err
+	if err = json.NewDecoder(r).Decode(&h); err != nil {
+		l.logger.Printf("cannot decode marshaled header: %s", err)
+		return nil, err
+	}
+	return h, nil
 }
 
 func (l *MessageLayer) WriteHeader(h *Header) (err error) {
