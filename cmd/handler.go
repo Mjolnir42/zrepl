@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/zrepl/zrepl/rpc"
 	"github.com/zrepl/zrepl/zfs"
 )
 
@@ -34,6 +35,26 @@ type Handler struct {
 	Logger          Logger
 	PullACL         zfs.DatasetFilter
 	SinkMappingFunc func(clientIdentity string) (mapping DatasetMapping, err error)
+}
+
+func registerEndpoints(server rpc.RPCServer, handler Handler) (err error) {
+	err = server.RegisterEndpoint("FilesystemRequest", handler.HandleFilesystemRequest)
+	if err != nil {
+		panic(err)
+	}
+	err = server.RegisterEndpoint("FilesystemVersionsRequest", handler.HandleFilesystemVersionsRequest)
+	if err != nil {
+		panic(err)
+	}
+	err = server.RegisterEndpoint("InitialTransferRequest", handler.HandleInitialTransferRequest)
+	if err != nil {
+		panic(err)
+	}
+	err = server.RegisterEndpoint("IncrementalTransferRequest", handler.HandleIncrementalTransferRequest)
+	if err != nil {
+		panic(err)
+	}
+	return nil
 }
 
 func (h Handler) HandleFilesystemRequest(r *FilesystemRequest, roots *[]*zfs.DatasetPath) (err error) {

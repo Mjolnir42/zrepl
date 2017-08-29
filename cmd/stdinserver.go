@@ -64,23 +64,7 @@ func cmdStdinServer(cmd *cobra.Command, args []string) {
 	}
 
 	server := rpc.NewServer(sshByteStream)
-	err = server.RegisterEndpoint("FilesystemRequest", handler.HandleFilesystemRequest)
-	if err != nil {
-		panic(err)
-	}
-	err = server.RegisterEndpoint("FilesystemVersionsRequest", handler.HandleFilesystemVersionsRequest)
-	if err != nil {
-		panic(err)
-	}
-	err = server.RegisterEndpoint("InitialTransferRequest", handler.HandleInitialTransferRequest)
-	if err != nil {
-		panic(err)
-	}
-	err = server.RegisterEndpoint("IncrementalTransferRequest", handler.HandleIncrementalTransferRequest)
-	if err != nil {
-		panic(err)
-	}
-
+	registerEndpoints(server, handler)
 	if err = server.Serve(); err != nil {
 		log.Printf("error serving connection: %s", err)
 		os.Exit(1)

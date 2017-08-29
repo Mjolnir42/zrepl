@@ -25,52 +25,6 @@ type endpointDescr struct {
 	handler reflect.Value
 }
 
-func makeEndpointDescr(handler interface{}) (descr endpointDescr, err error) {
-
-	ht := reflect.TypeOf(handler)
-
-	if ht.Kind() != reflect.Func {
-		err = errors.Errorf("handler must be of kind reflect.Func")
-		return
-	}
-
-	if ht.NumIn() != 2 || ht.NumOut() != 1 {
-		err = errors.Errorf("handler must have exactly two input parameters and one output parameter")
-		return
-	}
-	if !(ht.In(0).Kind() == reflect.Ptr || typeIsIOReader(ht.In(0))) {
-		err = errors.Errorf("input parameter must be a pointer or an io.Reader, is of kind %s, type %s", ht.In(0).Kind(), ht.In(0))
-		return
-	}
-	if !(ht.In(1).Kind() == reflect.Ptr) {
-		err = errors.Errorf("second input parameter (the non-error output parameter) must be a pointer or an *io.Reader")
-		return
-	}
-	errInterfaceType := reflect.TypeOf((*error)(nil)).Elem()
-	if !ht.Out(0).Implements(errInterfaceType) {
-		err = errors.Errorf("handler must return an error")
-		return
-	}
-
-	descr.handler = reflect.ValueOf(handler)
-	descr.inType.local = ht.In(0)
-	descr.outType.local = ht.In(1)
-
-	if typeIsIOReader(ht.In(0)) {
-		descr.inType.proto = DataTypeOctets
-	} else {
-		descr.inType.proto = DataTypeMarshaledJSON
-	}
-
-	if typeIsIOReaderPtr(ht.In(1)) {
-		descr.outType.proto = DataTypeOctets
-	} else {
-		descr.outType.proto = DataTypeMarshaledJSON
-	}
-
-	return
-}
-
 type MarshaledJSONEndpoint func(bodyJSON interface{})
 
 func NewServer(rwc io.ReadWriteCloser) *Server {

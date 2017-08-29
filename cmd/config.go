@@ -451,8 +451,18 @@ func (t SSHTransport) Connect(rpcLog Logger) (r rpc.RPCClient, err error) {
 }
 
 func (t LocalTransport) Connect(rpcLog Logger) (r rpc.RPCClient, err error) {
-	// TODO register endpoints with local RPC
-	return rpc.NewLocalRPC(), nil
+	local := rpc.NewLocalRPC()
+	handler := Handler{
+		Logger: log,
+		// Allow access to any dataset since we control what mapping
+		// is passed to the pull routine.
+		// All local datasets will be passed to its Map() function,
+		// but only those for which a mapping exists will actually be pulled.
+		// We can pay this small performance penalty for now.
+		PullACL: localPullACL{},
+	}
+	registerEndpoints(local, handler)
+	return local, nil
 }
 
 func parsePrunes(m interface{}) (rets map[string]*Prune, err error) {

@@ -238,7 +238,7 @@ func doPull(pull PullContext) (err error) {
 	log.Printf("requesting remote filesystem list")
 	fsr := FilesystemRequest{}
 	var remoteFilesystems []*zfs.DatasetPath
-	if err = remote.Call("FilesystemRequest", fsr, &remoteFilesystems); err != nil {
+	if err = remote.Call("FilesystemRequest", &fsr, &remoteFilesystems); err != nil {
 		return
 	}
 
@@ -323,7 +323,7 @@ func doPull(pull PullContext) (err error) {
 			Filesystem: m.Remote,
 		}
 		var theirVersions []zfs.FilesystemVersion
-		if err = remote.Call("FilesystemVersionsRequest", r, &theirVersions); err != nil {
+		if err = remote.Call("FilesystemVersionsRequest", &r, &theirVersions); err != nil {
 			log("error requesting remote filesystem versions: %s", err)
 			log("stopping replication for all filesystems mapped as children of %s", m.Local.ToString())
 			return false
@@ -367,7 +367,7 @@ func doPull(pull PullContext) (err error) {
 
 			var stream io.Reader
 
-			if err = remote.Call("InitialTransferRequest", r, &stream); err != nil {
+			if err = remote.Call("InitialTransferRequest", &r, &stream); err != nil {
 				log("error requesting initial transfer: %s", err)
 				return false
 			}
@@ -425,7 +425,7 @@ func doPull(pull PullContext) (err error) {
 					To:         to,
 				}
 				var stream io.Reader
-				if err = remote.Call("IncrementalTransferRequest", r, &stream); err != nil {
+				if err = remote.Call("IncrementalTransferRequest", &r, &stream); err != nil {
 					log("error requesting incremental snapshot stream: %s", err)
 					return false
 				}
