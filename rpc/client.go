@@ -24,7 +24,11 @@ func (c *Client) SetLogger(logger Logger) {
 }
 
 func (c *Client) Close() (err error) {
-	return c.ml.HangUp()
+	err = c.ml.HangUp()
+	if err == RST {
+		return nil
+	}
+	return err
 }
 
 func (c *Client) recvResponse() (h *Header, err error) {
