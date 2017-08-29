@@ -80,9 +80,13 @@ func NewServer(rwc io.ReadWriteCloser) *Server {
 	}
 }
 
-func (s *Server) SetLogger(logger Logger) {
+func (s *Server) SetLogger(logger Logger, logMessageLayer bool) {
 	s.logger = logger
-	s.ml.logger = logger
+	if logMessageLayer {
+		s.ml.logger = logger
+	} else {
+		s.ml.logger = noLogger{}
+	}
 }
 
 func (s *Server) RegisterEndpoint(name string, handler interface{}) (err error) {
