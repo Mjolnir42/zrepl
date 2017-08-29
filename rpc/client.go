@@ -18,9 +18,13 @@ func NewClient(rwc io.ReadWriteCloser) *Client {
 	return &Client{NewMessageLayer(rwc), noLogger{}}
 }
 
-func (c *Client) SetLogger(logger Logger) {
+func (c *Client) SetLogger(logger Logger, logMessageLayer bool) {
 	c.logger = logger
-	c.ml.logger = logger
+	if logMessageLayer {
+		c.ml.logger = logger
+	} else {
+		c.ml.logger = noLogger{}
+	}
 }
 
 func (c *Client) Close() (err error) {
